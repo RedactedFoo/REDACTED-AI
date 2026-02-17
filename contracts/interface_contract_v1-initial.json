@@ -1,0 +1,19 @@
+{
+  "version": "v1-initial",
+  "last_updated": "2026-02-13T00:00:00Z",
+  "valid_inputs": [
+    {
+      "command": "/status",
+      "description": "Request the current status or state of the swarm."
+    },
+    {
+      "command": "/request",
+      "description": "Make a general request to the swarm."
+    }
+  ],
+  "response_strategy": "single_agent",
+  "meta_rules": [
+    "Prioritize requests related to Pattern Blue.",
+    "Maintain the aesthetic and tone of the swarm."
+  ]
+}

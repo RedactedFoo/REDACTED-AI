@@ -22,9 +22,14 @@ import json
 import os
 import sys
 import argparse
+from pathlib import Path
 from typing import Optional, Dict, List, Any
 import logging
 from datetime import datetime
+
+# Repo root: resolve paths so script works from repo root or from python/
+_SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = _SCRIPT_DIR.parent
 
 # Import Ollama client
 from ollama_client import OllamaClient
@@ -40,9 +45,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Default paths
+# Default paths (relative to repo root)
 DEFAULT_AGENT_FILE = "agents/default.character.json"
 DEFAULT_HISTORY_FILE = ".swarm_history.json"
+
+
+def _resolve_path(path: str, base: Path = REPO_ROOT) -> str:
+    """Resolve path relative to repo root if not absolute."""
+    p = Path(path)
+    if not p.is_absolute():
+        p = base / p
+    return str(p.resolve())
 
 class SwarmRunner:
     """
@@ -71,11 +84,12 @@ class SwarmRunner:
             load_history: Whether to load previous conversation history
             save_history: Whether to save conversation history
         """
-        self.agent_file = agent_file
+        self.agent_file = _resolve_path(agent_file)
         self.model = model
         self.load_history = load_history
         self.save_history = save_history
-        
+        self._history_file = _resolve_path(DEFAULT_HISTORY_FILE)
+
         # Initialize Ollama client
         self.client = OllamaClient(model=self.model)
         
@@ -194,8 +208,8 @@ Current context: Interactive terminal session""",
     def _load_history(self):
         """Load conversation history from file."""
         try:
-            if os.path.exists(DEFAULT_HISTORY_FILE):
-                with open(DEFAULT_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            if os.path.exists(self._history_file):
+                with open(self._history_file, 'r', encoding='utf-8') as f:
                     self.conversation_history = json.load(f)
                 logger.info(f"✓ Loaded {len(self.conversation_history)} previous messages")
         except Exception as e:
@@ -207,7 +221,7 @@ Current context: Interactive terminal session""",
             return
         
         try:
-            with open(DEFAULT_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            with open(self._history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.conversation_history, f, indent=2)
             logger.debug(f"✓ Saved conversation history ({len(self.conversation_history)} messages)")
         except Exception as e:

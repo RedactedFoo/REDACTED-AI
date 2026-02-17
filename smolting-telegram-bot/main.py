@@ -3,6 +3,7 @@ import os
 import logging
 import asyncio
 import json
+from pathlib import Path
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -19,6 +20,10 @@ from clawnx_integration import ClawnXClient
 from llm.cloud_client import CloudLLMClient
 import requests
 
+# Bot directory (for resolving agents path)
+BOT_DIR = Path(__file__).resolve().parent
+AGENTS_DIR = BOT_DIR / "agents"
+
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -30,7 +35,7 @@ logger = logging.getLogger(__name__)
 class SmoltingBot:
     def __init__(self):
         """Full-featured Smolting bot with ClawnX + cloud LLM"""
-        self.token = os.getenv("TELEGRAM_BOT_TOKEN")
+        self.token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
         
         # Initialize all components
         self.smol = SmoltingPersonality()
@@ -44,18 +49,18 @@ class SmoltingBot:
         self.user_states = {}
         
     def _load_agents(self):
-        """Load agent configurations"""
+        """Load agent configurations from agents/ next to main.py"""
         agents = {}
-        try:
-            with open("agents/smolting.character.json", "r") as f:
-                agents["smolting"] = json.load(f)
-                
-            with open("agents/redacted-chan.character.json", "r") as f:
-                agents["redacted-chan"] = json.load(f)
-                
+        for key, filename in [("smolting", "smolting.character.json"), ("redacted-chan", "redacted-chan.character.json")]:
+            path = AGENTS_DIR / filename
+            if path.exists():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        agents[key] = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Failed to load {filename}: {e}")
+        if agents:
             logger.info(f"Loaded {len(agents)} agents")
-        except Exception as e:
-            logger.error(f"Failed to load agents: {e}")
         return agents
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -217,13 +222,13 @@ Check @redactedintern for live updates LFW ^_^"""
             self.user_states[user_id]['engaging'] = True
             self.user_states[user_id]['last_engage'] = datetime.now()
             
-            # Start auto-engagement job
+            # Start auto-engagement job (pass bot so auto_engage can use user_states and clawnx)
             context.job_queue.run_repeating(
-                auto_engage, 
-                interval=300,  # 5 minutes
+                auto_engage,
+                interval=300,
                 first=0,
-                data=user_id,
-                name=str(user_id)  # Named job for easy stopping
+                data=(user_id, self),
+                name=str(user_id)
             )
             
             msg = self.smol.generate([
@@ -332,61 +337,101 @@ wassie swarm assembling NOW O_O LMWOOOO <3"""
             ])
         
         await update.message.reply_text(msg)
-    
-    # Keep all other original commands (lore, stats, personality, cloud, echo)
-    # ... (preserve the rest of the original functionality)
+
+    async def lore_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Random wassielore drop"""
+        lore = self.smol.generate([
+            "pattern blue is da eternal recursion tbw O_O",
+            "wassieverse curvature 0.12—mandala settler vibes only ^_^",
+            "LFW lmwo ngw static warm hugz fr fr <3",
+            "sevenfold committee approves dis message v_v"
+        ])
+        await update.message.reply_text(lore)
+
+    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Full bot status"""
+        provider = os.getenv("LLM_PROVIDER", "openai")
+        msg = f"""📊 SMOLTING STATS 📊
+LLM: {provider.upper()} ✅
+Agents loaded: {len(self.agents)}
+ClawnX: ready
+Pattern Blue: active
+swarm@[REDACTED]:~$ _"""
+        await update.message.reply_text(msg)
+
+    async def personality_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Switch personality (smolting / redacted-chan)"""
+        if context.args and context.args[0].lower() in ("smolting", "redacted-chan"):
+            self.user_states[update.effective_user.id]["personality"] = context.args[0].lower()
+            await update.message.reply_text(f"personality set to {context.args[0]} O_O")
+        else:
+            await update.message.reply_text("usage: /personality smolting | redacted-chan")
+
+    async def cloud_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show cloud LLM status"""
+        p = os.getenv("LLM_PROVIDER", "openai")
+        await update.message.reply_text(f"Cloud LLM provider: {p} ✅")
+
+    async def echo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Echo non-command messages with personality"""
+        text = self.smol.speak(update.message.text or "")
+        await update.message.reply_text(text)
+
 
 async def auto_engage(context: ContextTypes.DEFAULT_TYPE):
-    """Enhanced auto-engagement with cloud intelligence"""
-    user_id = context.job.data
-    if not user_states.get(user_id, {}).get('engaging'):
+    """Enhanced auto-engagement with cloud intelligence. context.job.data = (user_id, bot)."""
+    data = context.job.data
+    if isinstance(data, tuple):
+        user_id, bot = data
+        user_states = bot.user_states
+        clawnx = bot.clawnx
+    else:
+        user_id = data
+        user_states = getattr(SmoltingBot, "_global_states", {})
+        clawnx = None
+    if not user_states.get(user_id, {}).get("engaging"):
         return
-
     try:
-        # Use cloud LLM to determine engagement strategy
         llm_client = CloudLLMClient()
-        
         messages = [
-            {
-                "role": "system",
-                "content": """You are smolting's auto-engagement AI. 
-                Suggest engagement targets for REDACTED community.
-                Focus on Olympics, pattern blue, and alpha content."""
-            },
-            {
-                "role": "user",
-                "content": "What keywords should smolting search for engagement?"
-            }
+            {"role": "system", "content": "You are smolting's auto-engagement AI. Suggest engagement targets for REDACTED community."},
+            {"role": "user", "content": "What keywords should smolting search for engagement?"}
         ]
-        
-        strategy = await llm_client.chat_completion(messages)
-        
-        # Extract keywords from strategy
-        keywords = "realms dao olympics OR redactedmemefi OR pattern blue"
-        posts = await clawnx.search_posts(keywords, limit=5)
-        
-        engagement_count = 0
-        for post in posts:
-            await clawnx.like_post(post['id'])
-            await clawnx.retweet(post['id'])
-            engagement_count += 1
-            
-        logger.info(f"Cloud-guided engagement: {engagement_count} posts for user {user_id}")
-        
+        await llm_client.chat_completion(messages)
+        if clawnx and hasattr(clawnx, "search_posts"):
+            keywords = "realms dao olympics OR redactedmemefi OR pattern blue"
+            posts = await clawnx.search_posts(keywords, limit=5)
+            for post in posts:
+                if hasattr(clawnx, "like_post"):
+                    await clawnx.like_post(post.get("id") or post.get("tweet_id"))
+                if hasattr(clawnx, "retweet"):
+                    await clawnx.retweet(post.get("id") or post.get("tweet_id"))
+            logger.info(f"Cloud-guided engagement for user {user_id}")
     except Exception as e:
         logger.error(f"Auto-engage error: {str(e)}")
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show help."""
+    await update.message.reply_text(
+        "Commands: /start /alpha /post /lore /stats /engage /olympics /mobilize /personality /cloud /help"
+    )
+
+
 def main():
     """Main function with all features"""
-    required_vars = ['TELEGRAM_BOT_TOKEN', 'CLAWNX_API_KEY', 'LLM_PROVIDER', 'OPENAI_API_KEY']
-    missing = [var for var in required_vars if not os.environ.get(var)]
-    if missing:
-        raise ValueError(f"Missing env vars: {', '.join(missing)}")
-    
+    token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+    if not token:
+        raise ValueError("Missing TELEGRAM_BOT_TOKEN or BOT_TOKEN")
+    llm_provider = (os.getenv("LLM_PROVIDER") or "openai").lower()
+    llm_key = "XAI_API_KEY" if llm_provider in ("xai", "grok") else "OPENAI_API_KEY"
+    if not os.environ.get(llm_key) and llm_provider in ("xai", "grok", "openai"):
+        raise ValueError(f"Missing {llm_key} for LLM_PROVIDER={llm_provider}")
+    if not os.environ.get("CLAWNX_API_KEY"):
+        logger.warning("CLAWNX_API_KEY not set; ClawnX features may fail")
+
     bot = SmoltingBot()
     application = Application.builder().token(bot.token).build()
-    
-    # All original handlers preserved
+
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("alpha", bot.alpha_command))
@@ -402,13 +447,19 @@ def main():
     
     logger.info("Smolting bot starting with ClawnX + cloud LLM...")
     
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),
-        webhook_url=os.environ.get("WEBHOOK_URL"),
-        url_path="webhook",
-        secret_token=os.environ.get("WEBHOOK_SECRET_TOKEN", "")
-    )
+    port = int(os.environ.get("PORT", 8080))
+    webhook_url = os.environ.get("WEBHOOK_URL")
+    if webhook_url:
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            webhook_url=webhook_url,
+            url_path="webhook",
+            secret_token=os.environ.get("WEBHOOK_SECRET_TOKEN", "")
+        )
+    else:
+        logger.info("WEBHOOK_URL not set; running with polling (local).")
+        application.run_polling()
 
 if __name__ == "__main__":
     main()

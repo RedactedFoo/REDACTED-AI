@@ -6,10 +6,12 @@ import json
 from typing import Optional, Dict, Any
 
 class CloudLLMClient:
-    """Cloud LLM client supporting multiple providers"""
+    """Cloud LLM client supporting multiple providers (OpenAI, Anthropic, Together, xAI/Grok)"""
     
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", "openai")  # openai, anthropic, together
+        self.provider = os.getenv("LLM_PROVIDER", "openai").lower()  # openai, anthropic, together, xai, grok
+        if self.provider == "grok":
+            self.provider = "xai"  # grok uses xAI API
         self.api_key = self._get_api_key()
         self.base_url = self._get_base_url()
         
@@ -18,34 +20,39 @@ class CloudLLMClient:
         keys = {
             "openai": os.getenv("OPENAI_API_KEY"),
             "anthropic": os.getenv("ANTHROPIC_API_KEY"),
-            "together": os.getenv("TOGETHER_API_KEY")
+            "together": os.getenv("TOGETHER_API_KEY"),
+            "xai": os.getenv("XAI_API_KEY"),  # Grok / xAI
         }
-        return keys.get(self.provider, "")
+        return keys.get(self.provider, "") or ""
     
     def _get_base_url(self) -> str:
         """Get base URL for provider"""
         urls = {
             "openai": "https://api.openai.com/v1",
             "anthropic": "https://api.anthropic.com/v1",
-            "together": "https://api.together.xyz/v1"
+            "together": "https://api.together.xyz/v1",
+            "xai": "https://api.x.ai/v1",  # Grok / xAI OpenAI-compatible
         }
         return urls.get(self.provider, "")
     
     async def chat_completion(self, messages: list, model: str = None) -> str:
         """Chat completion with cloud LLM"""
         
-        if self.provider == "openai":
+        if self.provider in ("openai", "xai"):
             return await self._openai_completion(messages, model)
         elif self.provider == "anthropic":
             return await self._anthropic_completion(messages, model)
         elif self.provider == "together":
             return await self._together_completion(messages, model)
         else:
-            raise ValueError(f"Unsupported provider: {self.provider}")
+            raise ValueError(f"Unsupported provider: {self.provider}. Set LLM_PROVIDER to openai, xai, anthropic, or together.")
     
     async def _openai_completion(self, messages: list, model: str = None) -> str:
-        """OpenAI GPT completion"""
-        model = model or "gpt-3.5-turbo"
+        """OpenAI GPT completion (also used for xAI/Grok OpenAI-compatible API)"""
+        if self.provider == "xai":
+            model = model or os.getenv("XAI_MODEL", "grok-2-latest")
+        else:
+            model = model or "gpt-3.5-turbo"
         
         payload = {
             "model": model,
