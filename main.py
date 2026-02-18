@@ -22,6 +22,15 @@ def main():
     """
     Builds and executes the command to run the swarm worker.
     """
+    # --- DEBUGGING BLOCK ---
+    print("--- ENVIRONMENT VARIABLES ---")
+    # Print any variable that might be related to an API key or LLM provider
+    for key, value in sorted(os.environ.items()):
+        if "API" in key.upper() or "LLM" in key.upper() or "GROQ" in key.upper() or "OPENAI" in key.upper() or "XAI" in key.upper():
+            print(f"{key}={value}")
+    print("----------------------------")
+    # --- END DEBUGGING BLOCK ---
+
     repo_root = os.path.dirname(os.path.abspath(__file__))
     agent_path = os.getenv("AGENT_PATH", DEFAULT_AGENT_PATH)
     script_path = os.path.join(repo_root, WORKER_SCRIPT)
