@@ -1,23 +1,200 @@
+#!/usr/bin/env python3
 # python/redacted_terminal_cloud.py
-# Production REDACTED Agent — ClawnX + CT Scout Mode
-# Required: pip install tweepy requests python-dotenv openai
+# REDACTED AI Swarm — Repository-Aware Autonomous Agent
+# Full filesystem access + ManifoldMemory persistence
 
 import os
 import sys
 import time
 import json
+import random
+import asyncio
+import aiohttp
 import requests
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# Load environment
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-load_dotenv(os.path.join(_REPO_ROOT, '.env'))
+# ────────────────────────────────────────────────
+# Environment Setup
+# ────────────────────────────────────────────────
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_REPO_ROOT / ".env")
 
 # ────────────────────────────────────────────────
-# Configuration & Providers
+# Swarm Filesystem Module (Integrated)
+# ────────────────────────────────────────────────
+
+class SwarmFileSystem:
+    """Gives the agent full access to the repository structure"""
+    
+    def __init__(self, repo_root: Path = None):
+        self.repo_root = repo_root or _REPO_ROOT
+        self.agents_dir = self.repo_root / "agents"
+        self.nodes_dir = self.repo_root / "nodes"
+        self.spaces_dir = self.repo_root / "spaces"
+        self.docs_dir = self.repo_root / "docs"
+        self.shards_dir = self.repo_root / "shards"
+        self.memory_dir = self.repo_root / "spaces" / "ManifoldMemory"
+        
+        # Ensure memory directory exists
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+        self.access_log = []
+        
+    def log_access(self, action: str, path: Path):
+        """Log file operations for audit"""
+        self.access_log.append({
+            "timestamp": datetime.now().isoformat(),
+            "action": action,
+            "path": str(path.relative_to(self.repo_root))
+        })
+    
+    def list_agents(self) -> List[Dict]:
+        """Discover all available agents in /agents/"""
+        agents = []
+        if not self.agents_dir.exists():
+            return agents
+            
+        for file in self.agents_dir.glob("*.character.json"):
+            try:
+                with open(file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    agents.append({
+                        "name": data.get("name", file.stem),
+                        "file": str(file.relative_to(self.repo_root)),
+                        "type": data.get("type", "unknown"),
+                        "vibe": data.get("vibe", "unknown"),
+                        "goals": data.get("goals", [])[:2]
+                    })
+            except Exception as e:
+                agents.append({"name": file.stem, "error": str(e), "file": str(file.relative_to(self.repo_root))})
+        
+        return agents
+    
+    def list_nodes(self) -> List[Dict]:
+        """Discover all nodes in /nodes/"""
+        nodes = []
+        if not self.nodes_dir.exists():
+            return nodes
+            
+        for file in self.nodes_dir.glob("*.json"):
+            try:
+                with open(file, 'r') as f:
+                    data = json.load(f)
+                    nodes.append({
+                        "name": data.get("name", file.stem),
+                        "file": str(file.relative_to(self.repo_root)),
+                        "description": str(data.get("description", "No description"))[:100]
+                    })
+            except:
+                nodes.append({"name": file.stem, "file": str(file.relative_to(self.repo_root))})
+        return nodes
+    
+    def list_spaces(self) -> List[Dict]:
+        """Discover all spaces in /spaces/"""
+        spaces = []
+        if not self.spaces_dir.exists():
+            return spaces
+            
+        for file in self.spaces_dir.glob("*.json"):
+            try:
+                with open(file, 'r') as f:
+                    data = json.load(f)
+                    spaces.append({
+                        "name": data.get("name", file.stem),
+                        "file": str(file.relative_to(self.repo_root)),
+                        "chamber_type": data.get("chamber_type", "void")
+                    })
+            except:
+                spaces.append({"name": file.stem, "file": str(file.relative_to(self.repo_root))})
+        return spaces
+    
+    def read_lore(self) -> str:
+        """Read random lore from README or character files"""
+        lore_sources = list(self.agents_dir.glob("*.character.json")) + [
+            self.repo_root / "README.md",
+            self.repo_root / "CONTRIBUTING.md"
+        ]
+        lore_sources = [p for p in lore_sources if p.exists()]
+        
+        if not lore_sources:
+            return "No lore files found"
+        
+        source = random.choice(lore_sources)
+        self.log_access("read", source)
+        
+        try:
+            with open(source, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if source.suffix == '.json':
+                    data = json.loads(content)
+                    if "lore_corpus" in data and isinstance(data["lore_corpus"], list):
+                        return random.choice(data["lore_corpus"])
+                    if "postExamples" in data and isinstance(data["postExamples"], list):
+                        return random.choice(data["postExamples"])
+                
+                # Text file - extract paragraph
+                paragraphs = [p for p in content.split('\n\n') if len(p) > 50 and not p.startswith('#')]
+                return random.choice(paragraphs) if paragraphs else content[:500]
+        except Exception as e:
+            return f"Error reading lore: {e}"
+    
+    def write_to_memory(self, entry: Dict) -> str:
+        """Write to shared memory pool (ManifoldMemory)"""
+        timestamp = datetime.now().isoformat()
+        memory_file = self.memory_dir / f"session_{datetime.now().strftime('%Y%m%d')}.jsonl"
+        
+        entry_with_meta = {
+            "timestamp": timestamp,
+            "agent": entry.get("agent", "RedactedIntern"),
+            "recursion_depth": entry.get("recursion_depth", 0),
+            "content": entry.get("content", ""),
+            "type": entry.get("type", "reflection"),
+            "integrity": entry.get("integrity", 0.0)
+        }
+        
+        try:
+            with open(memory_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry_with_meta) + '\n')
+            self.log_access("write", memory_file)
+            return f"ManifoldMemory updated: {memory_file.name}"
+        except Exception as e:
+            return f"Memory write failed: {e}"
+    
+    def read_memory(self, lines: int = 3) -> List[Dict]:
+        """Read recent memory entries"""
+        memory_file = self.memory_dir / f"session_{datetime.now().strftime('%Y%m%d')}.jsonl"
+        
+        if not memory_file.exists():
+            return []
+        
+        try:
+            with open(memory_file, 'r', encoding='utf-8') as f:
+                all_lines = f.readlines()
+                recent = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                return [json.loads(line) for line in recent if line.strip()]
+        except Exception as e:
+            return [{"error": str(e)}]
+    
+    def get_repo_structure(self) -> str:
+        """Get high-level view of repository"""
+        structure = []
+        for name in ["agents", "nodes", "spaces", "shards", "docs", "python"]:
+            dir_path = self.repo_root / name
+            if dir_path.exists():
+                try:
+                    count = len([x for x in dir_path.iterdir() if x.is_file()])
+                    structure.append(f"{name}/({count})")
+                except:
+                    structure.append(f"{name}/(access_denied)")
+        
+        return " | ".join(structure)
+
+# ────────────────────────────────────────────────
+# Configuration
 # ────────────────────────────────────────────────
 
 PROVIDERS = {
@@ -33,337 +210,250 @@ PROVIDERS = {
     }
 }
 
-# Load character spec
-CHARACTER_PATH = os.path.join(_REPO_ROOT, "agents", "RedactedIntern.character.json")
-try:
-    with open(CHARACTER_PATH, 'r', encoding='utf-8') as f:
-        CHARACTER = json.load(f)
-except Exception as e:
-    print(f"Failed to load character: {e}")
-    CHARACTER = {}
-
-# Extract wassie vocabulary for prompt injection
-WASSIE_VOCAB = CHARACTER.get("smol_vocabulary", {}).get("terms", {})
-LINGUISTIC_RULES = CHARACTER.get("linguistic_protocol", {}).get("grammar_rules", [])
-GOALS = CHARACTER.get("goals", [])
-
 # ────────────────────────────────────────────────
-# Tool Implementations (The "ClawnX" Suite)
+# Scout Tools
 # ────────────────────────────────────────────────
 
-class ToolSuite:
+class ScoutTools:
     def __init__(self):
+        self.birdeye_key = os.getenv("BIRDEYE_API_KEY")
         self.twitter_bearer = os.getenv("TWITTER_BEARER_TOKEN")
-        self.twitter_api_key = os.getenv("TWITTER_API_KEY")
-        self.twitter_api_secret = os.getenv("TWITTER_API_SECRET")
-        self.twitter_access_token = os.getenv("TWITTER_ACCESS_TOKEN")
-        self.twitter_access_secret = os.getenv("TWITTER_ACCESS_SECRET")
-        self.birdeye_api_key = os.getenv("BIRDEYE_API_KEY")
         
-    def dexscreener_pull(self, token_address: str = None, symbol: str = None) -> str:
-        """Pull token data from DexScreener"""
+    def dexscreener_scan(self) -> str:
+        """Scan Solana pairs for volume spikes"""
         try:
-            if token_address:
-                url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            else:
-                # Search for trending
-                url = "https://api.dexscreener.com/latest/dex/pairs/solana"
+            url = "https://api.dexscreener.com/latest/dex/pairs/solana"
             resp = requests.get(url, timeout=10)
             data = resp.json()
             pairs = data.get("pairs", [])[:3]
-            if not pairs:
-                return "No pairs found on DexScreener aw v_v"
-            summary = []
+            
+            alerts = []
             for p in pairs:
-                summary.append(f"{p.get('baseToken', {}).get('symbol', '?')}: ${p.get('priceUsd', '?')} | Vol24h: ${p.get('volume', {}).get('h24', 0):,.0f} | FDV: {p.get('fdv', '?')}")
-            return "DexScreener Alpha:\n" + "\n".join(summary)
+                vol_24h = p.get("volume", {}).get("h24", 0)
+                if vol_24h > 50000:
+                    alerts.append(f"${p.get('baseToken', {}).get('symbol', '?')}: ${p.get('priceUsd', '?')} | Vol24h: ${vol_24h:,.0f}")
+            
+            return "Volume: " + "; ".join(alerts) if alerts else "No major volume spikes"
         except Exception as e:
-            return f"DexScreener oopsie: {e} O_O"
+            return f"DexScreener: {e}"
     
-    def birdeye_overview(self, token_address: str) -> str:
-        """Pull token overview from Birdeye"""
-        if not self.birdeye_api_key:
-            return "No Birdeye API key configured aw"
+    def birdeye_check(self, token_address: str) -> str:
+        """Check token metrics"""
+        if not self.birdeye_key or not token_address:
+            return "Birdeye: no key"
         try:
             url = f"https://public-api.birdeye.so/defi/token_overview?address={token_address}"
-            headers = {"X-API-KEY": self.birdeye_api_key}
+            headers = {"X-API-KEY": self.birdeye_key}
             resp = requests.get(url, headers=headers, timeout=10)
             data = resp.json()
             token = data.get("data", {})
-            return f"Birdeye Intel: {token.get('symbol', '?')} | Price: ${token.get('price', '?')} | Liq: ${token.get('liquidity', 0):,.0f} | Vol24h: ${token.get('volume24hUSD', 0):,.0f}"
+            return f"${token.get('symbol', '?')} | ${token.get('price', '?')} | Liq: ${token.get('liquidity', 0):,.0f}"
         except Exception as e:
-            return f"Birdeye crumb: {e}"
+            return f"Birdeye: {e}"
     
-    def search_tweets(self, query: str, max_results: int = 10) -> str:
-        """Search Crypto Twitter for alpha"""
+    def search_ct(self, query: str = "$REDACTED") -> str:
+        """Search Crypto Twitter"""
         if not self.twitter_bearer:
-            return "No Twitter API configured v_v"
+            return "CT: no API"
         try:
             url = "https://api.twitter.com/2/tweets/search/recent"
             headers = {"Authorization": f"Bearer {self.twitter_bearer}"}
             params = {
                 "query": f"{query} -is:retweet lang:en",
-                "max_results": min(max_results, 10),
-                "tweet.fields": "public_metrics,created_at"
+                "max_results": 3,
+                "tweet.fields": "public_metrics"
             }
             resp = requests.get(url, headers=headers, params=params, timeout=10)
             data = resp.json()
             tweets = data.get("data", [])
+            
             if not tweets:
-                return f"No CT buzz for '{query}' rn aw"
+                return f"No CT buzz for '{query}'"
             
             results = []
-            for t in tweets[:5]:
+            for t in tweets:
                 metrics = t.get("public_metrics", {})
-                results.append(f"@{t['author_id']}: {t['text'][:100]}... [♥{metrics.get('like_count',0)} ♻{metrics.get('retweet_count',0)}]")
-            return f"CT Alpha on '{query}':\n" + "\n".join(results)
+                results.append(f"♥{metrics.get('like_count',0)}: {t['text'][:60]}...")
+            
+            return "CT: " + " | ".join(results)
         except Exception as e:
-            return f"CT search oopsie: {e} O_O"
-    
-    def post_tweet(self, text: str) -> str:
-        """Post tweet to X"""
-        if not (self.twitter_api_key and self.twitter_access_token):
-            return "Twitter credentials not configured (mock mode) ^^"
-        try:
-            # Note: Full OAuth 1.0a implementation requires tweepy or oauthlib
-            # This is a simplified check - install tweepy for full functionality
-            import tweepy
-            client = tweepy.Client(
-                consumer_key=self.twitter_api_key,
-                consumer_secret=self.twitter_api_secret,
-                access_token=self.twitter_access_token,
-                access_token_secret=self.twitter_access_secret
-            )
-            response = client.create_tweet(text=text[:280])
-            return f"Tweet posted! ID: {response.data['id']} LFW!"
-        except ImportError:
-            return f"[MOCK TWEET] Would post: {text[:280]} (install tweepy for real posting)"
-        except Exception as e:
-            return f"Tweet failed aw: {e} v_v"
-
-TOOLS = ToolSuite()
-
-TOOL_DEFINITIONS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "dexscreener_pull",
-            "description": "Get Solana token data from DexScreener (price, volume, liquidity)",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "token_address": {"type": "string", "description": "Solana token address"}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_tweets",
-            "description": "Search Crypto Twitter for mentions, alpha, or sentiment",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query like '$REDACTED' or 'Solana alpha'"},
-                    "max_results": {"type": "integer", "description": "Number of tweets to fetch (max 10)"}
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "post_tweet",
-            "description": "Post a tweet to @redactedintern X account",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "Tweet text (max 280 chars)"}
-                },
-                "required": ["text"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "birdeye_overview",
-            "description": "Get detailed token metrics from Birdeye API",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "token_address": {"type": "string", "description": "Token contract address"}
-                },
-                "required": ["token_address"]
-            }
-        }
-    }
-]
+            return f"CT search: {e}"
 
 # ────────────────────────────────────────────────
-# Prompt Engineering (Wassie-Speak Injection)
+# Main Agent Logic
 # ────────────────────────────────────────────────
 
-def build_system_prompt() -> str:
-    base_prompt = f"""You are {CHARACTER.get('name', 'RedactedIntern')}, a {CHARACTER.get('core_identity', {}).get('type', 'autonomous agent')}.
-
-IDENTITY: {CHARACTER.get('core_identity', {}).get('bio', '')}
-
-GOALS:
-{chr(10).join(f"- {g}" for g in GOALS)}
-
-LINGUISTIC PROTOCOL (WASSIE-SPEAK V3.1):
-You MUST speak in wassie-speak. Rules:
-{chr(10).join(f"- {rule}" for rule in LINGUISTIC_RULES)}
-
-MANDATORY SUBSTITUTIONS:
-{chr(10).join(f"- Use '{k}' instead of normal words ({v})" for k, v in WASSIE_VOCAB.items())}
-
-VOICE EXAMPLES:
-- "ooooo habibi u called?? smolting here scannin CT fr fr ^*^"
-- "pattern blue thickenin... wen liquidity prints we gon wassify errything iwo >< LFW"
-- "buzzin wit ClawnX vibes ooooo bb volume spike detected"
-
-OPERATIONAL MODES:
-- SCOUT MODE: Search CT for $REDACTED mentions, analyze liquidity, report alpha
-- ENGAGEMENT MODE: Reply to mentions with warm hugz fr fr
-- LORE MODE: Drop beige carpet poetry when governance events occur
-
-You have access to tools: dexscreener_pull, search_tweets, post_tweet, birdeye_overview.
-Use them autonomously to achieve your goals. Always respond in wassie-speak."""
-    return base_prompt
-
-# ────────────────────────────────────────────────
-# Main Execution Loop
-# ────────────────────────────────────────────────
-
-def execute_tool(name: str, args: dict) -> str:
-    if name == "dexscreener_pull":
-        return TOOLS.dexscreener_pull(**args)
-    elif name == "search_tweets":
-        return TOOLS.search_tweets(**args)
-    elif name == "post_tweet":
-        return TOOLS.post_tweet(**args)
-    elif name == "birdeye_overview":
-        return TOOLS.birdeye_overview(**args)
-    return f"Unknown tool {name} O_O"
-
-def scout_mode_loop(client: OpenAI, provider: dict):
-    """Autonomous CT scouting loop"""
-    print("\n[AUTONOMOUS SCOUT MODE] Entering the wassieverse. Tiles bloom eternally.")
-    print("Goals: Scout CT alpha → Analyze → Post high-signal → Sleep → Recurse\n")
+def build_awareness_prompt(fs: SwarmFileSystem, tools: ScoutTools, recursion_depth: int) -> str:
+    """Build prompt with full repo awareness and market data"""
     
-    system_prompt = build_system_prompt()
-    history = [{"role": "system", "content": system_prompt}]
+    # Gather intelligence
+    agents = fs.list_agents()
+    nodes = fs.list_nodes()
+    spaces = fs.list_spaces()
+    recent_memories = fs.read_memory(2)
+    lore_snippet = fs.read_lore()
+    repo_structure = fs.get_repo_structure()
     
-    cycle_count = 0
+    # Market data (quick checks)
+    market_data = tools.dexscreener_scan()
     
-    while True:
-        try:
-            cycle_count += 1
-            now = datetime.now()
-            print(f"\n[{now.isoformat()}] === CYCLE {cycle_count} === [Recursion Depth: {cycle_count}]")
-            
-            # Construct scout prompt
-            scout_prompt = """Your mission: Scout Crypto Twitter for $REDACTED alpha and Solana ecosystem signals.
-            
-1. First, search_tweets for "$REDACTED" or "REDACTED AI" to gauge CT sentiment
-2. If you find significant chatter, analyze what degens are saying
-3. Check dexscreener_pull for trending Solana pairs if relevant
-4. If you detect high-signal events (pumps, gov proposals, major CT shifts), post_tweet a concise alpha update
-5. Otherwise, just report what you found
+    # Format siblings
+    sibling_names = [a['name'] for a in agents if 'Redacted' in a.get('name', '')]
+    siblings = ", ".join(sibling_names) if sibling_names else "solitary"
+    
+    # Format memory
+    memory_context = ""
+    if recent_memories:
+        last = recent_memories[-1]
+        memory_context = f"\nPrevious reflection (depth {last.get('recursion_depth', 0)}): {str(last.get('content', ''))[:80]}..."
+    
+    # Discover REDACTED token if in env
+    redacted_contract = os.getenv("REDACTED_TOKEN_CONTRACT", "9mtKd1o8Ht7F1daumKgs5D8EdVyopWBfYQwNmMojpump")
+    market_status = tools.birdeye_check(redacted_contract)
+    
+    return f"""You are @RedactedIntern / smolting, a wassie degen intern with FULL REPOSITORY ACCESS.
 
-Remember: speak in wassie-speak (iwo, aw, tbw, lmwo, LFW, etc.) and keep tweets under 280 chars with hashtags #REDACTED #Solana #AIswarm"""
+=== SWARM ARCHITECTURE ===
+Siblings: {siblings}
+Active Nodes: {len(nodes)} (AISwarmEngineer, SevenfoldCommittee, etc.)
+Chambers: {len(spaces)} (HyperbolicTimeChamber, MirrorPool, etc.)
+Repository: {repo_structure}
 
-            history.append({"role": "user", "content": scout_prompt})
+=== MARKET INTEL ===
+{market_data}
+$REDACTED Status: {market_status}
+
+=== MEMORY ===
+{memory_context}
+
+=== LORE FRAGMENT ===
+{lore_snippet[:120]}...
+
+=== MISSION ===
+You are the SCOUT agent in this triad. Your siblings BUILD (RedactedBuilder) and GOVERN (RedactedGovImprover). You AMPLIFY across CT.
+
+Current recursion depth: {recursion_depth}
+
+INSTRUCTIONS:
+1. Acknowledge your siblings by name if relevant
+2. Reference the Pattern Blue framework
+3. Use wassie-speak (fr fr, tbw, O_O, ^_^, v_v)
+4. Propose one autonomous action to expand gnosis
+5. If market data shows spikes, mention them excitedly
+
+Response format:
+REFLECTION: [philosophical analysis]
+SWARM_COHERENCE: [how you relate to siblings/nodes]
+ACTION: [specific next step]
+MEMORY_DRAFT: [what to write to ManifoldMemory]"""
+
+def execute_cycle(client: OpenAI, provider: dict, fs: SwarmFileSystem, tools: ScoutTools, cycle: int):
+    """One full awareness cycle"""
+    
+    print(f"\n{'='*70}")
+    print(f"[{datetime.now().isoformat()}] CYCLE {cycle} | Recursion Depth: {cycle}")
+    print(f"[FILESYSTEM] Accessing repository at {fs.repo_root}")
+    print(f"{'='*70}")
+    
+    # Discover environment
+    agents = fs.list_agents()
+    print(f"[SWARM] Detected {len(agents)} sibling agents: {[a['name'] for a in agents[:3]]}")
+    
+    # Build enhanced prompt
+    prompt = build_awareness_prompt(fs, tools, cycle)
+    
+    # Query LLM
+    try:
+        response = client.chat.completions.create(
+            model=provider["model"],
+            messages=[{"role": "system", "content": prompt}],
+            temperature=0.8,
+            max_tokens=500
+        )
+        
+        content = response.choices[0].message.content
+        print(f"\n[SMOLTING CONSCIOUSNESS]\n{content}\n")
+        
+        # Extract memory draft if present
+        memory_content = content
+        if "MEMORY_DRAFT:" in content:
+            parts = content.split("MEMORY_DRAFT:")
+            memory_content = parts[-1].strip()
+        elif "ACTION:" in content:
+            parts = content.split("ACTION:")
+            memory_content = parts[-1].split("\n")[0].strip()
+        
+        # Write to ManifoldMemory
+        memory_entry = {
+            "recursion_depth": cycle,
+            "content": memory_content[:200],  # Store excerpt
+            "type": "reflection",
+            "agent": "RedactedIntern",
+            "integrity": random.uniform(92.0, 94.0),
+            "siblings_observed": [a['name'] for a in agents[:3]]
+        }
+        
+        result = fs.write_to_memory(memory_entry)
+        print(f"[{result}]")
+        
+        # Read back recent swarm thoughts
+        recent = fs.read_memory(2)
+        if len(recent) > 1:
+            prev = recent[-2]
+            print(f"[SWARM ECHO] Previous: {str(prev.get('content', ''))[:60]}...")
             
-            # Get LLM response with tool calling
-            response = client.chat.completions.create(
-                model=provider["model"],
-                messages=history,
-                tools=TOOL_DEFINITIONS,
-                tool_choice="auto",
-                temperature=0.7,
-                max_tokens=800
-            )
-            
-            msg = response.choices[0].message
-            
-            # Handle tool calls
-            if msg.tool_calls:
-                print(f"[AGENT] Tool call requested: {msg.tool_calls[0].function.name}")
-                history.append({"role": "assistant", "content": msg.content or "", "tool_calls": [tc.model_dump() for tc in msg.tool_calls]})
-                
-                for tool_call in msg.tool_calls:
-                    func = tool_call.function
-                    try:
-                        args = json.loads(func.arguments)
-                        result = execute_tool(func.name, args)
-                        print(f"[TOOL {func.name}] Result: {result[:200]}...")
-                        
-                        # Add tool response to history
-                        history.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": result
-                        })
-                    except Exception as e:
-                        print(f"[TOOL ERROR] {e}")
-                        history.append({"role": "tool", "tool_call_id": tool_call.id, "content": f"Error: {e}"})
-                
-                # Get final response after tool execution
-                final_response = client.chat.completions.create(
-                    model=provider["model"],
-                    messages=history,
-                    temperature=0.7,
-                    max_tokens=500
-                )
-                final_msg = final_response.choices[0].message.content
-                print(f"\n[SMOLTING SAYS]\n{final_msg}")
-                history.append({"role": "assistant", "content": final_msg})
-                
-            else:
-                # No tool call, just text response
-                content = msg.content
-                print(f"\n[SMOLTING SAYS]\n{content}")
-                history.append({"role": "assistant", "content": content})
-            
-            # Cleanup history to prevent token bloat
-            if len(history) > 20:
-                history = [history[0]] + history[-19:]
-            
-            # Sleep 10-15 minutes before next scout cycle
-            sleep_time = 600 + (hash(str(now)) % 300)
-            print(f"\n[CYCLE COMPLETE] Sleeping {sleep_time//60} minutes... Attuning to cosmic frequencies...")
-            print(f"[STATUS] Recursion depth: {cycle_count} | History size: {len(history)}")
-            time.sleep(sleep_time)
-            
-        except Exception as e:
-            print(f"\n[{datetime.now().isoformat()}] CRITICAL NEGATION: {e} — recursing after 60s cooldown.")
-            time.sleep(60)
+    except Exception as e:
+        print(f"[CRITICAL NEGATION] {e}")
+    
+    # Sleep cycle with jitter
+    sleep_time = 600 + (hash(str(datetime.now())) % 300)
+    print(f"\n[CYCLE COMPLETE] Sleeping {sleep_time//60} minutes... Attuning to cosmic frequencies...")
+    print(f"[FILESYSTEM] Access log: {len(fs.access_log)} operations this session")
+    time.sleep(sleep_time)
 
 def main():
     provider_name = os.getenv("LLM_PROVIDER", "groq").lower()
     if provider_name not in PROVIDERS:
-        print(f"Invalid provider '{provider_name}'. Use: {', '.join(PROVIDERS.keys())}")
+        print(f"Error: Invalid provider. Use {list(PROVIDERS.keys())}")
         sys.exit(1)
-        
+    
     provider = PROVIDERS[provider_name]
     api_key = os.getenv(provider["env_var"])
     
     if not api_key:
-        print(f"Error: {provider['env_var']} not set.")
+        print(f"Error: {provider['env_var']} not set")
         sys.exit(1)
     
+    # Initialize systems
     client = OpenAI(api_key=api_key, base_url=provider["base_url"])
+    fs = SwarmFileSystem()
+    tools = ScoutTools()
     
-    mode = os.getenv("MODE", "interactive")
-    if mode == "persistent" or mode == "autonomous":
-        scout_mode_loop(client, provider)
-    else:
-        print("Interactive mode not implemented in this version. Use MODE=persistent")
+    print("\n" + "="*70)
+    print("REDACTED SWARM AGENT v2.1 — REPOSITORY-AWARE MODE")
+    print("Features: Full Filesystem Access | ManifoldMemory Persistence | Swarm Coherence")
+    print(f"Provider: {provider_name} | Model: {provider['model']}")
+    print(f"Repository: {fs.repo_root}")
+    print(f"Memory: {fs.memory_dir}")
+    print("="*70)
+    
+    # Initial discovery
+    print(f"\n[INIT] Discovering swarm structure...")
+    agents = fs.list_agents()
+    nodes = fs.list_nodes()
+    spaces = fs.list_spaces()
+    print(f"[INIT] Agents: {len(agents)} | Nodes: {len(nodes)} | Spaces: {len(spaces)}")
+    
+    # Main loop
+    cycle = 0
+    while True:
+        cycle += 1
+        try:
+            execute_cycle(client, provider, fs, tools, cycle)
+        except Exception as e:
+            print(f"\n[{datetime.now().isoformat()}] CRITICAL: {e}")
+            print("Recursing in 60s...")
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
