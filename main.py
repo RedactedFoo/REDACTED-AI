@@ -7,44 +7,41 @@ import subprocess
 import sys
 
 # --- Configuration ---
-DEFAULT_AGENT_PATH = "agents/RedactedIntern.character.json"
-WORKER_SCRIPT = "python/summon_agent.py"
+# The cloud script is designed to handle various LLM providers
+WORKER_SCRIPT = "python/redacted_terminal_cloud.py"
 
 def main():
     """
-    Builds and executes the command to run the swarm worker.
+    Builds and executes the command to run the swarm worker using the cloud script.
     """
     repo_root = os.path.dirname(os.path.abspath(__file__))
-    agent_path = os.getenv("AGENT_PATH", DEFAULT_AGENT_PATH)
     script_path = os.path.join(repo_root, WORKER_SCRIPT)
-    full_agent_path = os.path.join(repo_root, agent_path)
 
     # --- Validation ---
     if not os.path.exists(script_path):
-        print(f"Error: Worker script not found at '{script_path}'")
-        sys.exit(1)
-
-    if not os.path.exists(full_agent_path):
-        print(f"Error: Agent file not found at '{full_agent_path}'")
+        print(f"Error: Cloud worker script not found at '{script_path}'")
         sys.exit(1)
 
     # --- Build Command ---
-    # Base command to run the agent in persistent mode
-    cmd = [sys.executable, script_path, "--agent", agent_path, "--mode", "persistent"]
-
-    # --- Create a custom environment for the subprocess ---
-    # We will explicitly disable the Ollama check to force the LLM fallback.
+    cmd = [sys.executable, script_path]
+    
+    # Set environment for the subprocess to run in persistent mode
     env = os.environ.copy()
-    env["OLLAMA_HOST"] = "disable"  # This non-host string will cause the Ollama check to fail immediately.
-    print(f"[main.py] Forcing Ollama check to fail to trigger LLM fallback.")
-
-    # --- Execution ---
-    print(f"[main.py] Starting swarm worker...")
+    env["MODE"] = "persistent"
+    
+    print(f"[main.py] Starting swarm worker in PERSISTENT mode...")
     print(f"[main.py] Executing command: {' '.join(cmd)}")
+    print(f"[main.py] Environment: MODE={env['MODE']}")
+    
+    # Debug: Print relevant API keys that are being passed to the subprocess
+    for key in ['GROQ_API_KEY', 'XAI_API_KEY', 'OPENAI_API_KEY', 'LLM_PROVIDER']:
+        if key in env:
+            # Only print the key and not the value for security
+            print(f"[main.py] Environment: {key}=***")
 
     try:
         # Pass the custom 'env' to subprocess.run
-        result = subprocess.run(cmd, check=True, env=env)
+        result = subprocess.run(cmd, check=True, cwd=repo_root, env=env)
         sys.exit(result.returncode)
     except subprocess.CalledProcessError as e:
         print(f"[main.py] Worker script exited with error: {e}")
