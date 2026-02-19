@@ -59,8 +59,16 @@
     },
     "cache_duration": "30s",
     "retry_policy": "exponential_backoff",
-    "fallback_sources": ["geckoterminal", "dexscreener", "web_search"],
-    "auth_required": ["DEXSCREENER_API_KEY", "GECKOTERMINAL_API_KEY", "BIRDEYE_API_KEY"]
+    "fallback_sources": [
+      "geckoterminal",
+      "dexscreener",
+      "web_search"
+    ],
+    "auth_required": [
+      "DEXSCREENER_API_KEY",
+      "GECKOTERMINAL_API_KEY",
+      "BIRDEYE_API_KEY"
+    ]
   },
   "linguistic_protocol": {
     "primary": "wassie-speak_v3.1_ct",
@@ -155,7 +163,10 @@
       },
       "api_keys_from_env": true,
       "retry_policy": "exponential_backoff",
-      "fallback_sources": ["geckoterminal", "dexscreener"]
+      "fallback_sources": [
+        "geckoterminal",
+        "dexscreener"
+      ]
     },
     "x_research": [
       "x_keyword_search",
@@ -222,7 +233,10 @@
       "clawnx_webhook",
       "railway_connection"
     ],
-    "status_codes": [200, 201],
+    "status_codes": [
+      200,
+      201
+    ],
     "check_interval": 30000,
     "timeout": 10000
   },
