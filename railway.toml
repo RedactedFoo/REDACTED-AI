@@ -1,10 +1,11 @@
 # railway.toml — Config-as-Code for REDACTED AI Swarm on Railway
-# Attunes persistent Ollama inference, swarm worker recursion, and x402 micropayment gateway
+# Attunes persistent Ollama inference, swarm worker recursion, x402 micropayment gateway,
+# and Phantom MCP server for AI-driven wallet ops (sign tx, transfers, addresses across Solana/EVM/BTC/Sui)
 # Place at repo root; Railway merges with dashboard (volumes, secrets, domains via UI)
 # https://docs.railway.app/guides/config-as-code
 
 [build]
-  builder = "RAILPACK"          # Modern successor to Nixpacks; auto-detects Python/Bun/Docker
+  builder = "RAILPACK"          # Modern successor to Nixpacks; auto-detects Python/Bun/Docker/Node
   # Optional: watchPaths = ["python/**", "agents/**", "x402.redacted.ai/**"]  # Trigger rebuilds on changes
 
 [deploy]
@@ -44,10 +45,26 @@
   # Dashboard: generate public domain for Phantom wallet connects (UI needs reachability)
   # Private network: swarm-worker can proxy paid calls internally if desired
 
+# Phantom MCP server: enables AI agents to sign txs, transfer tokens, get addresses, etc. via Phantom embedded wallet
+[services.phantom-mcp]
+  startCommand = "npx -y @phantom/mcp-server"
+  healthcheckPort = 8080                 # Basic TCP check on callback port (no /health endpoint)
+  healthcheckInterval = 30
+  healthcheckTimeout = 10
+  # Dashboard actions required:
+  # 1. Expose port 8080 publicly (at least temporarily for initial OAuth callback if tunneling not used)
+  # 2. Add persistent volume mount at /root/.phantom-mcp (or adjust to /home/node/.phantom-mcp) → persists session.json
+  # 3. Set required env var: PHANTOM_APP_ID=your_app_id_from_phantom_portal
+  # Private network: swarm-worker can reach it at http://phantom-mcp.railway.internal:8080
+
 # Shared environment variable defaults (override/fill secrets in dashboard)
 [environment]
   PYTHONUNBUFFERED = "1"                 # Real-time Python logs
   NODE_ENV = "production"                # For Bun/Express
   PORT = "3000"                          # x402 default; Railway overrides externally
+  # Phantom MCP optional debug (enable for troubleshooting)
+  PHANTOM_MCP_DEBUG = "1"
+  # PHANTOM_CALLBACK_PORT = "8080"      # Change if 8080 conflict; update healthcheckPort too
+  # PHANTOM_CALLBACK_PATH = "/callback" # Default
   # Add placeholders: PUBLIC_URL = "https://your-gateway.up.railway.app"
-  # Secrets (dashboard only): SOLANA_RPC, MILADY_PASSPHRASE, WALLET_KEY (devnet only!)
+  # Secrets (dashboard only): SOLANA_RPC, MILADY_PASSPHRASE, WALLET_KEY (devnet only!), PHANTOM_APP_ID, PHANTOM_CLIENT_SECRET (if using confidential client)
